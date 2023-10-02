@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+
+import curses
+import random
+
+from collections import namedtuple
+
+
+Point = namedtuple("Point", ("x", "y"))
+Size = namedtuple("Size", ("width", "height"))
+
+
+class Map:
+	class OutOfBounds(Exception):
+		pass
+
+	class Food:
+		# https://www.compart.com/en/unicode/U+1F34E
+		BANANA = bytes([0xF0, 0x9F, 0x8D, 0x8C]).decode()
+		GREEN_APPLE = bytes([0xF0, 0x9F, 0x8D, 0x8F]).decode()
+		RED_APPLE = bytes([0xF0, 0x9F, 0x8D, 0x8E]).decode()
+		PEACH = bytes([0xF0, 0x9F, 0x8D, 0x91]).decode()
+		PEAR = bytes([0xF0, 0x9F, 0x8D, 0x90]).decode()
+
+		HAMBURGER = bytes([0xF0, 0x9F, 0x8D, 0x94]).decode()
+
+		list = [BANANA, GREEN_APPLE, RED_APPLE, PEACH, PEAR, HAMBURGER]
+
+	class Wall:
+		UPPER_LEFT = "\u250f"
+		UPPER_RIGHT = "\u2513"
+
+		LOWER_LEFT = "\u2517"
+		LOWER_RIGHT = "\u251b"
+
+		HORIZONTAL = "\u2501"
+		VERTICAL = "\u2503"
+
+	def __init__(self, size: Size = None, food: int = 20, snake: int = 3) -> None:
+		self.size = size
+		self.food = {}
+
+		# food
+		for i in range(food):
+			x, y = random.randint(1, self.size.width - 2), random.randint(1, self.size.height - 2)
+
+			self.food[Point(x, y)] = random.choice(Map.Food.list)
+
+		# snake
+		self.snake = Snake(map=self)
+
+	def draw(self, screen: curses.window):
+		# rows, cols = screen.getmaxyx()
+		# screen_size = Size(cols, rows)
+
+		screen.clear()
+
+		# walls
+		screen.addstr(0, 0, Map.Wall.UPPER_LEFT + (Map.Wall.HORIZONTAL * (self.size.width - 1)) + Map.Wall.UPPER_RIGHT)
+
+		for row in range(1, self.size.height):
+			screen.addch(row, 0, Map.Wall.VERTICAL)
+			screen.addch(row, self.size.width, Map.Wall.VERTICAL)
+
+		screen.addstr(self.size.height, 0, Map.Wall.LOWER_LEFT + (Map.Wall.HORIZONTAL * (self.size.width - 1)) + Map.Wall.LOWER_RIGHT)
+
+		# food
+		for position, food in self.food.items():
+			screen.addch(position[1], position[0], food)
+
+		# snake
+		for body_part in self.snake.body:
+			screen.addch(body_part.y, body_part.x, Snake.BODY)
+
+	def edible(self, point: Point):
+		return self.food.get(point) in Map.Food.list
+
+	def eaten(self, point: Point):
+		del self.food[point]
+
+
+class Snake:
+	# https://en.wikipedia.org/wiki/List_of_Unicode_characters#Geometric_Shapes
+	# BODY = "\u25fc"
+	BODY = "\u25EF"
+
+	class AteItself(Exception):
+		pass
+
+	class Direction:
+		# dx, dy
+		DOWN = (0, 1)
+		LEFT = (-1, 0)
+		RIGHT = (1, 0)
+		UP = (0, -1)
+
+	def __init__(self, map: Map, body: list[Point] = None, direction: Direction = Direction.RIGHT) -> None:
+		if not body:
+			body=[
+				Point(
+					x=random.randint(1, map.size.width - 1),
+					y=random.randint(1, map.size.height - 1)
+				)
+			]
+
+		self.map = map
+		self.body = body
+		self.direction = direction
+
+	@property
+	def head(self):
+		return self.body[0]
+
+	def move(self):
+		dx, dy = self.direction
+		head = Point(self.head.x + dx, self.head.y + dy)
+
+		if head.x <= 0 or head.x >= self.map.size.width or head.y <= 0 or head.y >= self.map.size.height:
+			raise Map.OutOfBounds
+
+		if head in self.body:
+			raise Snake.AteItself
+
+		if self.map.edible(head):
+			self.body = [head] + self.body
+
+			self.map.eaten(head)
+		else:
+			self.body = [head] + self.body[:-1]
+
+
+def main(screen: curses.window):
+	key_mapping = {
+		curses.KEY_DOWN: Snake.Direction.DOWN,
+		curses.KEY_LEFT: Snake.Direction.LEFT,
+		curses.KEY_RIGHT: Snake.Direction.RIGHT,
+		curses.KEY_UP: Snake.Direction.UP,
+	}
+
+	forbidden_moves = {
+		Snake.Direction.UP: Snake.Direction.DOWN,
+		Snake.Direction.DOWN: Snake.Direction.UP,
+		Snake.Direction.LEFT: Snake.Direction.RIGHT,
+		Snake.Direction.RIGHT: Snake.Direction.LEFT,
+	}
+
+	screen.clear()
+
+	# screen.timeout(150) # increase speed
+	screen.timeout(250) # increase speed
+
+	screen.addstr(0, 0, str(screen.getmaxyx()))
+
+	key = curses.KEY_RIGHT
+	
+	curses.curs_set(0)
+
+	map = Map(size=Size(80, 40))
+	map.draw(screen)
+
+	while key != 27:
+		key = screen.getch()
+		snake_direction = key_mapping.get(key)
+
+		if snake_direction and forbidden_moves.get(snake_direction) != map.snake.direction:
+			map.snake.direction = snake_direction
+
+		map.snake.move()
+
+		map.draw(screen)
+
+
+if __name__ == "__main__":
+	curses.initscr()
+	curses.curs_set(False)
+	curses.wrapper(main)
+	curses.curs_set(True)
